@@ -164,13 +164,19 @@ class Hound_RLHL_Control:
         waypoints.generate_waypoints()
         print("\n1\n")
         # initialize the odometry and imu subscribers with callbacks
-        self.odom_sub = rospy.Subscriber(
-            "/mavros/local_position/odom", Odometry, self.odom_callback
-        )
+        if self.obs_type == "racing":
+            # MuSHR: use wheel odom; angular velocity taken from odom twist directly
+            self.odom_sub = rospy.Subscriber(
+                "/car/odom", Odometry, self.odom_callback
+            )
+            self.imu = True  # sentinel — racing path reads angular vel from odom
+        else:
+            self.odom_sub = rospy.Subscriber(
+                "/mavros/local_position/odom", Odometry, self.odom_callback
+            )
+            self.imu_sub = rospy.Subscriber("/camera/gyro/sample", Imu, self.imu_callback)
 
         self.rc_sub = rospy.Subscriber('/car/teleop/joy', Joy, self.rcin_callback)
-
-        self.imu_sub = rospy.Subscriber("/camera/gyro/sample", Imu, self.imu_callback)
         # self.grid_map_sub = rospy.Subscriber(
         #     "/grid_map_occlusion_inpainting/all_grid_map",
         #     GridMap,
@@ -289,10 +295,15 @@ class Hound_RLHL_Control:
         self.twists[0] = odom.twist.twist.linear.x
         self.twists[1] = odom.twist.twist.linear.y
         self.twists[2] = odom.twist.twist.linear.z
-        # lazy fix for wierd camera reference frame
-        self.twists[3] = self.imu.angular_velocity.z
-        self.twists[4] = - self.imu.angular_velocity.x
-        self.twists[5] = - self.imu.angular_velocity.y
+        if self.obs_type == "racing":
+            self.twists[3] = odom.twist.twist.angular.x
+            self.twists[4] = odom.twist.twist.angular.y
+            self.twists[5] = odom.twist.twist.angular.z
+        else:
+            # lazy fix for weird camera reference frame
+            self.twists[3] = self.imu.angular_velocity.z
+            self.twists[4] = - self.imu.angular_velocity.x
+            self.twists[5] = - self.imu.angular_velocity.y
 
         if self.obs_type == "relative":
             self.obtain_relative_state(odom)
