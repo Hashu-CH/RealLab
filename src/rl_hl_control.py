@@ -119,13 +119,16 @@ class Hound_RLHL_Control:
         elif self.obs_type == "racing":
             self.image_shape = (40, 80)
             self.resize_shape = (80, 60)  # cv2 (W, H); top 1/3 crop drops to 40 rows
-            image_dim = self.image_shape[0] * self.image_shape[1]
-            obs_dim = image_dim + 8  # +6 twists, +2 last action
+            image_dim = 3 * self.image_shape[0] * self.image_shape[1]  # RGB channels
+            # VISION-ONLY: obs is image only — no twists or last action.
+            # To restore vision+IMU change obs_dim to image_dim + 8 and
+            # set include_last_action = True, last_action_offset = image_dim + 6.
+            obs_dim = image_dim
             self.state = np.zeros(obs_dim, dtype=np.float32)
             self.image = np.zeros(image_dim, dtype=np.float32)
             self.cv_bridge = CvBridge()
-            self.include_last_action = True
-            self.last_action_offset = image_dim + 6
+            self.include_last_action = False  # VISION-ONLY: was True
+            # self.last_action_offset = image_dim + 6  # VISION-ONLY: restore with IMU
 
             ackwargs = {
                 "actor_hidden_dims": config_data["actor_hidden_dims"],
@@ -358,20 +361,22 @@ class Hound_RLHL_Control:
         self.state[image_offset:image_offset+6] = self.twists.numpy()
 
     def obtain_racing_state(self, odom):
-        image_offset = self.image_shape[0] * self.image_shape[1]
+        image_offset = 3 * self.image_shape[0] * self.image_shape[1]  # RGB
         self.state[:image_offset] = self.image
-        self.state[image_offset:image_offset + 6] = self.twists.numpy()
+        # VISION-ONLY: twists and last-action slots removed.
+        # To restore, uncomment below and update obs_dim = image_dim + 8.
+        # self.state[image_offset:image_offset + 6] = self.twists.numpy()
         # last-action slots (image_offset+6, image_offset+7) are written by send_ctrl
 
     def racing_image_callback(self, msg):
         try:
-            image = self.cv_bridge.imgmsg_to_cv2(msg, desired_encoding='bgr8')
+            image = self.cv_bridge.imgmsg_to_cv2(msg, desired_encoding='rgb8')
         except CvBridgeError as e:
             raise RuntimeError(e)
-        resized = cv2.resize(image, self.resize_shape)   # → (60, 80, 3)
-        resized = resized[resized.shape[0] // 3:, ...]   # drop top 1/3 → (40, 80, 3)
-        gray = cv2.cvtColor(resized, cv2.COLOR_BGR2GRAY) / 255.0
-        self.image = ((gray - 0.5) / 0.5).reshape(-1).astype(np.float32)
+        resized = cv2.resize(image, self.resize_shape)        # → (60, 80, 3) RGB
+        resized = resized[resized.shape[0] // 3:, ...]        # drop top 1/3 → (40, 80, 3)
+        rgb = resized.astype(np.float32) / 255.0              # [0, 1]
+        self.image = ((rgb - 0.5) / 0.5).reshape(-1).astype(np.float32)  # [−1, 1], CHW-flat
 
     def image_callback(self, msg, callback_args):
         try:
