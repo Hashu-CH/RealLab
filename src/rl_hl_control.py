@@ -31,7 +31,6 @@ class Hound_RLHL_Control:
         self.steering_max = config_data["steering_max"]
         self.rate = config_data["rate"]
         self.obs_type = config_data["obs_type"]
-        hidden_shape = config_data["hidden_shape"]
         model_path = config_data["model_path"]
         model_type = config_data["model_type"]
 
@@ -45,8 +44,9 @@ class Hound_RLHL_Control:
         self.pad_latch = True
 
         if self.obs_type == "relative":
+            hidden_shape = config_data["hidden_shape"]
             self.state = np.zeros(12, dtype=np.float32)
-            self.model = RLModel(model_path, 
+            self.model = RLModel(model_path,
                                  type=model_type,
                                  acargs=(12,12,2),
                                  ackwargs={
@@ -55,6 +55,7 @@ class Hound_RLHL_Control:
                                 })
             self.include_last_action = False
         elif self.obs_type == "blind":
+            hidden_shape = config_data["hidden_shape"]
             self.state = np.zeros(14, dtype=np.float32)
             self.model = RLModel(model_path,
                                 type=model_type,
@@ -66,6 +67,7 @@ class Hound_RLHL_Control:
             self.include_last_action = True
             self.last_action_offset = 12
         elif self.obs_type == "elevation":
+            hidden_shape = config_data["hidden_shape"]
             self.state = np.zeros(972, dtype=np.float32)
             self.model = RLModel(model_path,
                                 type=model_type,
@@ -79,6 +81,7 @@ class Hound_RLHL_Control:
             self.heightmap = np.load("/root/catkin_ws/src/hound_core/config/elevation/heightmap2.npy")
             self.heightmap_sub = rospy.Subscriber("/heightmap", Float32MultiArray, self.heightmap_callback)
         elif self.obs_type == "goal_based_elevation":
+            hidden_shape = config_data["hidden_shape"]
             self.state = np.zeros(975, dtype=np.float32)
             self.model = RLModel(model_path,
                                 type=model_type,
@@ -93,8 +96,9 @@ class Hound_RLHL_Control:
             self.heightmap_sub = rospy.Subscriber("/heightmap", Float32MultiArray, self.heightmap_callback)
             self.goal = np.array(config_data["goal"], dtype=np.float32)
         elif self.obs_type == 'rgb':
+            hidden_shape = config_data["hidden_shape"]
             self.state = np.zeros(40 * 80 + 8, dtype=np.float32)
-            self.model = RLModel(model_path, 
+            self.model = RLModel(model_path,
                                 type=model_type,
                                 acargs = (40 * 80 + 8, 40 * 80 + 8, 2),
                                 ackwargs={
@@ -109,6 +113,42 @@ class Hound_RLHL_Control:
             self.last_action_offset = 40 * 80 + 6
             self.image_sub = rospy.Subscriber("/camera/color/image_raw", Image, self.image_callback, callback_args={"resize_shape": self.resize_shape})
             self.threshold = config_data["threshold"]
+        elif self.obs_type == "racing":
+            self.image_shape = (40, 80)
+            self.resize_shape = (80, 60)  # cv2 (W, H); top 1/3 crop drops to 40 rows
+            image_dim = self.image_shape[0] * self.image_shape[1]
+            obs_dim = image_dim + 8  # +6 twists, +2 last action
+            self.state = np.zeros(obs_dim, dtype=np.float32)
+            self.image = np.zeros(image_dim, dtype=np.float32)
+            self.cv_bridge = CvBridge()
+            self.include_last_action = True
+            self.last_action_offset = image_dim + 6
+
+            ackwargs = {
+                "actor_hidden_dims": config_data["actor_hidden_dims"],
+                "critic_hidden_dims": config_data["critic_hidden_dims"],
+                "activation": config_data["activation"],
+                "image_shape": tuple(config_data["image_shape"]),
+                "cnn_channels": config_data["cnn_channels"],
+                "cnn_kernel_sizes": config_data["cnn_kernel_sizes"],
+                "cnn_strides": config_data["cnn_strides"],
+                "cnn_out_dim": config_data["cnn_out_dim"],
+            }
+            if model_type == "cnn_gru":
+                ackwargs.update({
+                    "rnn_type": config_data["rnn_type"],
+                    "rnn_hidden_dim": config_data["rnn_hidden_dim"],
+                    "rnn_num_layers": config_data["rnn_num_layers"],
+                })
+
+            self.model = RLModel(model_path,
+                                 type=model_type,
+                                 acargs=(obs_dim, obs_dim, 2),
+                                 ackwargs=ackwargs)
+
+            self.image_sub = rospy.Subscriber(
+                "/camera/color/image_raw", Image, self.racing_image_callback,
+            )
         else:
             ValueError("must choose valid obs type")
 
@@ -261,6 +301,8 @@ class Hound_RLHL_Control:
             self.obtain_goal_based_elevation_state(odom)
         elif self.obs_type == "rgb":
             self.obtain_rgb_state(odom)
+        elif self.obs_type == "racing":
+            self.obtain_racing_state(odom)
         else:
             ValueError("must choose valid obs type")
 
@@ -300,6 +342,22 @@ class Hound_RLHL_Control:
         image_offset = self.image_shape[0] * self.image_shape[1]
         self.state[:image_offset] = self.image
         self.state[image_offset:image_offset+6] = self.twists.numpy()
+
+    def obtain_racing_state(self, odom):
+        image_offset = self.image_shape[0] * self.image_shape[1]
+        self.state[:image_offset] = self.image
+        self.state[image_offset:image_offset + 6] = self.twists.numpy()
+        # last-action slots (image_offset+6, image_offset+7) are written by send_ctrl
+
+    def racing_image_callback(self, msg):
+        try:
+            image = self.cv_bridge.imgmsg_to_cv2(msg, desired_encoding='bgr8')
+        except CvBridgeError as e:
+            raise RuntimeError(e)
+        resized = cv2.resize(image, self.resize_shape)   # → (60, 80, 3)
+        resized = resized[resized.shape[0] // 3:, ...]   # drop top 1/3 → (40, 80, 3)
+        gray = cv2.cvtColor(resized, cv2.COLOR_BGR2GRAY) / 255.0
+        self.image = ((gray - 0.5) / 0.5).reshape(-1).astype(np.float32)
 
     def image_callback(self, msg, callback_args):
         try:

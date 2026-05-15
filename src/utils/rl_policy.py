@@ -1,6 +1,7 @@
-import torch 
+import torch
 from utils.actor_critic import ActorCritic
 from utils.cnn_actor_critic import CNNActorCritic
+from utils.actor_critic_cnn_gru import ActorCriticCNN, ActorCriticCNNGRU
 import numpy
 
 class RLModel:
@@ -12,6 +13,12 @@ class RLModel:
             self.Model.eval()
         elif type == "mlp":
             self.Model = ActorCritic(*acargs, **ackwargs)
+        elif type == "cnn_v2":
+            self.Model = ActorCriticCNN(*acargs, **ackwargs)
+            self.Model.eval()
+        elif type == "cnn_gru":
+            self.Model = ActorCriticCNNGRU(*acargs, **ackwargs)
+            self.Model.eval()
         else:
             raise ValueError("Invalid model type")
         self.Model.load_state_dict(loaded_dict["model_state_dict"])

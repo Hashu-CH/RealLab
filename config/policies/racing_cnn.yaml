@@ -1,0 +1,16 @@
+throttle_to_wheelspeed: 1.0
+model_path: "racing_cnn.pt"
+model_type: "cnn_v2"
+steering_max: 0.488
+rate: 20
+obs_type: "racing"
+
+# Architecture hyperparams (must match training)
+activation: "relu"
+actor_hidden_dims: [64, 64]
+critic_hidden_dims: [64, 64]
+image_shape: [1, 40, 80]
+cnn_channels: [8, 16]
+cnn_kernel_sizes: [5, 3]
+cnn_strides: [2, 2]
+cnn_out_dim: 32
