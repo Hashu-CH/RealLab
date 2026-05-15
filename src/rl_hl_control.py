@@ -17,14 +17,17 @@ from pathlib import Path
 import yaml
 import time
 import torch
+import rospkg
 from cv_bridge import CvBridge, CvBridgeError
 from diagnostic_msgs.msg import DiagnosticArray, DiagnosticStatus, KeyValue
 from utils.generate_elevation_map import crop_heightmap
 
+_PKG_PATH = rospkg.RosPack().get_path('real_lab')
+
 
 class Hound_RLHL_Control:
     def __init__(self, policy, data_collection):
-        with open(f"/root/catkin_ws/src/hound_core/config/policies/{policy}.yaml") as f:
+        with open(f"{_PKG_PATH}/config/policies/{policy}.yaml") as f:
             config_data = yaml.safe_load(f)
 
         self.throttle_to_wheelspeed = config_data["throttle_to_wheelspeed"]
@@ -78,7 +81,7 @@ class Hound_RLHL_Control:
                                 })
             self.include_last_action = True
             self.last_action_offset = 9
-            self.heightmap = np.load("/root/catkin_ws/src/hound_core/config/elevation/heightmap2.npy")
+            self.heightmap = np.load(f"{_PKG_PATH}/config/elevation/heightmap2.npy")
             self.heightmap_sub = rospy.Subscriber("/heightmap", Float32MultiArray, self.heightmap_callback)
         elif self.obs_type == "goal_based_elevation":
             hidden_shape = config_data["hidden_shape"]
@@ -92,7 +95,7 @@ class Hound_RLHL_Control:
                                 })
             self.include_last_action = True
             self.last_action_offset = 12
-            self.heightmap = np.load("/root/catkin_ws/src/hound_core/config/elevation/heightmap2.npy")
+            self.heightmap = np.load(f"{_PKG_PATH}/config/elevation/heightmap2.npy")
             self.heightmap_sub = rospy.Subscriber("/heightmap", Float32MultiArray, self.heightmap_callback)
             self.goal = np.array(config_data["goal"], dtype=np.float32)
         elif self.obs_type == 'rgb':
@@ -150,7 +153,7 @@ class Hound_RLHL_Control:
                 "/camera/color/image_raw", Image, self.racing_image_callback,
             )
         else:
-            ValueError("must choose valid obs type")
+            raise ValueError("must choose valid obs type")
 
         self.collect_data = data_collection
 
@@ -250,7 +253,7 @@ class Hound_RLHL_Control:
         control_msg.header.stamp = rospy.Time.now()
         control_msg.header.frame_id = "base_link"
         control_msg.drive.steering_angle = -(ctrl[1] * self.steering_max)
-        control_msg.drive.speed = 0.5 #if (ctrl[0] * self.throttle_to_wheelspeed) > 0 else 0
+        control_msg.drive.speed = ctrl[0] * self.throttle_to_wheelspeed
         if not self.start_action:
             control_msg.drive.speed = 0
         if self.include_last_action:
@@ -304,7 +307,7 @@ class Hound_RLHL_Control:
         elif self.obs_type == "racing":
             self.obtain_racing_state(odom)
         else:
-            ValueError("must choose valid obs type")
+            raise ValueError("must choose valid obs type")
 
     def obtain_blind_state(self, odom):
         self.state[:6] = self.pose.numpy()

@@ -1,12 +1,15 @@
 import torch
+import rospkg
 from utils.actor_critic import ActorCritic
 from utils.cnn_actor_critic import CNNActorCritic
 from utils.actor_critic_cnn_gru import ActorCriticCNN, ActorCriticCNNGRU
 import numpy
 
+_PKG_PATH = rospkg.RosPack().get_path('real_lab')
+
 class RLModel:
     def __init__(self, name, type="mlp", acargs=(12,12,2), ackwargs = {'actor_hidden_dims': [128,128], 'critic_hidden_dims': [128,128]}):
-        path = f"/root/catkin_ws/src/hound_core/src/models/{name}"
+        path = f"{_PKG_PATH}/src/models/{name}"
         loaded_dict = torch.load(path, map_location=torch.device('cpu'))
         if type == "cnn":
             self.Model = CNNActorCritic(*acargs, **ackwargs)

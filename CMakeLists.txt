@@ -13,6 +13,7 @@ find_package(catkin REQUIRED COMPONENTS
   rospy
   sensor_msgs
   std_msgs
+  ackermann_msgs
   vesc_msgs
   laser_geometry
 )
@@ -116,6 +117,7 @@ INCLUDE_DIRS
 CATKIN_DEPENDS roscpp
                sensor_msgs
                std_msgs
+               ackermann_msgs
                cv_bridge
                image_transport
                laser_geometry
